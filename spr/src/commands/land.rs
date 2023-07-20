@@ -205,8 +205,7 @@ pub async fn land(
             pr_head_oid = git.create_derived_commit(
                 pr_head_oid,
                 &format!(
-                    "[𝘀𝗽𝗿] landed version\n\nCreated using spr {}",
-                    env!("CARGO_PKG_VERSION"),
+                    "remove any changes already in mainline",
                 ),
                 our_tree_oid,
                 &[pr_head_oid, current_master],
