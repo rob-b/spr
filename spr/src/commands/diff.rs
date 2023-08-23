@@ -451,7 +451,7 @@ async fn diff_impl(
         let new_base_branch_commit = git.create_derived_commit(
             local_commit.parent_oid,
             &format!(
-                "[spr] {}\n\nCreated using spr {}\n\n[skip ci]",
+                "{}\n\n {}\n\n[skip ci]",
                 if pull_request.is_some() {
                     "changes introduced through rebase".to_string()
                 } else {
@@ -521,11 +521,11 @@ async fn diff_impl(
     let pr_commit = git.create_derived_commit(
         local_commit.oid,
         &format!(
-            "{}\n\nCreated using spr {}",
+            "{}\n\n {}",
             github_commit_message
                 .as_ref()
                 .map(|s| &s[..])
-                .unwrap_or("[spr] initial version"),
+                .unwrap_or("initial version"),
             env!("CARGO_PKG_VERSION"),
         ),
         new_head_tree,
