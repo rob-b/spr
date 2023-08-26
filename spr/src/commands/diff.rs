@@ -21,6 +21,8 @@ use crate::{
 use git2::Oid;
 use indoc::{formatdoc, indoc};
 
+use rand::seq::SliceRandom;
+
 #[derive(Debug, clap::Parser)]
 pub struct DiffOptions {
     /// Create/update pull requests for the whole branch, not just the HEAD commit
@@ -451,16 +453,15 @@ async fn diff_impl(
         let new_base_branch_commit = git.create_derived_commit(
             local_commit.parent_oid,
             &format!(
-                "{}\n\n {}\n\n[skip ci]",
+                "{}",
                 if pull_request.is_some() {
-                    "changes introduced through rebase".to_string()
+                    "rebase".to_string()
                 } else {
                     format!(
                         "changes to {} this commit is based on",
                         config.master_ref.branch_name()
                     )
                 },
-                env!("CARGO_PKG_VERSION"),
             ),
             new_base_tree,
             &parents[..],
@@ -517,16 +518,18 @@ async fn diff_impl(
         }
     }
 
+    let messages = vec!["Initial version", "wip", "lets go", "testing", "begin", "Starting..."];
+    let msg = messages.choose(&mut rand::thread_rng()).unwrap_or(&"first commit");
+
     // Create the new commit
     let pr_commit = git.create_derived_commit(
         local_commit.oid,
         &format!(
-            "{}\n\n {}",
+            "{}",
             github_commit_message
                 .as_ref()
                 .map(|s| &s[..])
-                .unwrap_or("initial version"),
-            env!("CARGO_PKG_VERSION"),
+                .unwrap_or(msg),
         ),
         new_head_tree,
         &pr_commit_parents[..],
