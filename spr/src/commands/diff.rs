@@ -65,7 +65,7 @@ pub async fn diff(
 
     // The parent of the first commit in the list is the commit on master that
     // the local branch is based on
-    let master_base_oid = if let Some(first_commit) = prepared_commits.get(0) {
+    let master_base_oid = if let Some(first_commit) = prepared_commits.first() {
         first_commit.parent_oid
     } else {
         output("👋", "Branch is empty - nothing to do. Good bye!")?;
@@ -145,6 +145,8 @@ async fn diff_impl(
     // Parsed commit message of the local commit
     let message = &mut local_commit.message;
 
+    let update_message = opts.update_message || config.auto_update_message;
+
     // Check if the local commit is based directly on the master branch.
     let directly_based_on_master = local_commit.parent_oid == master_base_oid;
 
@@ -195,7 +197,7 @@ async fn diff_impl(
         )?;
     }
 
-    if local_commit.pull_request_number.is_none() || opts.update_message {
+    if local_commit.pull_request_number.is_none() || update_message {
         validate_commit_message(message, config)?;
     }
 
@@ -207,7 +209,7 @@ async fn diff_impl(
             )));
         }
 
-        if !opts.update_message {
+        if !update_message {
             let mut pull_request_updates: PullRequestUpdate =
                 Default::default();
             pull_request_updates.update_message(pull_request, message);
@@ -349,7 +351,7 @@ async fn diff_impl(
             // Request branch and base are all the right ones.
             output("✅", "No update necessary")?;
 
-            if opts.update_message {
+            if update_message {
                 // However, the user requested to update the commit message on
                 // GitHub
 
@@ -450,19 +452,31 @@ async fn diff_impl(
             parents.push(master_base_oid);
         }
 
+        let mut message =
+            if pull_request.is_some() {
+                "Changes introduced through rebase".to_string()
+            } else {
+                format!(
+                    "Changes to {} this commit is based on",
+                    config.master_ref.branch_name()
+                )
+            };
+        if config.add_spr_banner_comment {
+            message = format!(
+                "[spr] {}\n\nCreated using spr {}",
+                message, env!("CARGO_PKG_VERSION"),
+            );
+        }
+        if config.add_skip_ci_comment {
+            message = format!(
+                "{}\n\n[skip ci]",
+                message,
+            );
+        }
+
         let new_base_branch_commit = git.create_derived_commit(
             local_commit.parent_oid,
-            &format!(
-                "{}",
-                if pull_request.is_some() {
-                    "rebase".to_string()
-                } else {
-                    format!(
-                        "changes to {}",
-                        config.master_ref.branch_name()
-                    )
-                },
-            ),
+            &message,
             new_base_tree,
             &parents[..],
         )?;
@@ -482,12 +496,12 @@ async fn diff_impl(
 
     let mut github_commit_message = opts.message.clone();
     if pull_request.is_some() && github_commit_message.is_none() {
-        let input = {
+        let mut input = {
             let message_on_prompt = message_on_prompt.clone();
 
             tokio::task::spawn_blocking(move || {
                 dialoguer::Input::<String>::new()
-                    .with_prompt("Message (leave empty to abort)")
+                    .with_prompt("Message (ABORT to abort)")
                     .with_initial_text(message_on_prompt)
                     .allow_empty(true)
                     .interact_text()
@@ -495,8 +509,11 @@ async fn diff_impl(
             .await??
         };
 
-        if input.is_empty() {
+        if input.eq("ABORT") {
             return Err(Error::new("Aborted as per user request".to_string()));
+        }
+        if input.is_empty() {
+            input = "No description".to_string()
         }
 
         *message_on_prompt = input.clone();
@@ -513,24 +530,35 @@ async fn diff_impl(
     if let Some(oid) = pr_base_parent {
         // ...unless if that's the same commit as the one we added to
         // pr_commit_parents first.
-        if pr_commit_parents.get(0) != Some(&oid) {
+        if pr_commit_parents.first() != Some(&oid) {
             pr_commit_parents.push(oid);
         }
     }
 
-    let messages = vec!["Initial version", "wip", "lets go", "testing", "begin", "Starting..."];
+    let messages = ["Initial version", "wip", "lets go", "testing", "begin", "Starting..."];
     let msg = messages.choose(&mut rand::thread_rng()).unwrap_or(&"first commit");
 
     // Create the new commit
-    let pr_commit = git.create_derived_commit(
-        local_commit.oid,
-        &format!(
-            "{}",
+    let pr_commit_message = if config.add_spr_banner_comment {
+        format!(
+            "{}\n\nCreated using spr {}",
             github_commit_message
                 .as_ref()
                 .map(|s| &s[..])
-                .unwrap_or(msg),
-        ),
+                .unwrap_or("[𝘀𝗽𝗿] initial version"),
+            env!("CARGO_PKG_VERSION"),
+        )
+    } else {
+        github_commit_message
+            .as_ref()
+            .map(|s| &s[..])
+            .unwrap_or(msg)
+            .to_string()
+    };
+
+    let pr_commit = git.create_derived_commit(
+        local_commit.oid,
+        &pr_commit_message,
         new_head_tree,
         &pr_commit_parents[..],
     )?;
@@ -567,7 +595,7 @@ async fn diff_impl(
         // Things we want to update in the Pull Request on GitHub
         let mut pull_request_updates: PullRequestUpdate = Default::default();
 
-        if opts.update_message {
+        if update_message {
             pull_request_updates.update_message(&pull_request, message);
         }
 
